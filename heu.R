@@ -72,6 +72,7 @@ heur0 <- function() { #{{{
 	xi <- fin_data[beg_idx:(beg_idx+d-1)]		# initial values for diffinv
 	z <<- diffinv(z, differences=d, xi=xi)		# recover original time series
 	z_n_1 <- z[length(z)]						# retrieve the last forecast	
+	tot_skips <<- tot_skips + cssl
 
 	# read 1 sample
 	z[length(z)] <<- all_data[end_idx+horiz]
@@ -114,19 +115,18 @@ heur0 <- function() { #{{{
 	}
 
 	#- - - - - - - - Step 4 - - - - - - - -
-	tot_skips <<- tot_skips + cssl
-	tot_smpls <<- end_idx + cssl
-
 	# slide sampling window one step forward
 	beg_idx <<- beg_idx + horiz
 	end_idx <<- end_idx + horiz
 	if(end_idx > max_idx)
 		return(FALSE)	
-	z <<- z[(length(z)-buf_len+1):length(z)]
+	z <<- ts(z[(length(z)-buf_len+1):length(z)], start=beg_idx)
+	tot_smpls <<- end_idx
 	
 	# compare the original samples and our reduced samples
 	#cat("\n all_data[beg_idx:end_idx]=\n   ", all_data[beg_idx:end_idx], file=out)
-	#cat("\n z=", z, "\n", file=out)
+	#cat("\n z=", z, "\n\n", file=out)
+	cat("\n diff=", all_data[beg_idx:end_idx]-z, "\n\n", file=out)
 
 	return(TRUE)
 } #}}}
@@ -180,7 +180,7 @@ heur1 <- function() { #{{{
 	#- - - - - - - - Forecast - - - - - - - -
 	fcast <- predict(best_model, n.ahead=mssl)
 	z <<- c(z, fcast$pred)						# concatenate predictions to original time series
-	xi <- all_data[beg_idx:(beg_idx+d-1)]		# initial values for diffinv (TODO)
+	xi <- fin_data[beg_idx:(beg_idx+d-1)]		# initial values for diffinv	
 	z <<- diffinv(z, differences=d, xi=xi)		# recover original time series
 	z_n_l <- z[(length(z)-mssl+1):length(z)]	# forecasts
 	half_intrvl <- lim_qtile*fcast$se			# half of confidence interval (search 'AirPassengers' in R manual)
@@ -194,6 +194,9 @@ heur1 <- function() { #{{{
 	for(i in 1:mssl) {
 		if(half_intrvl[i] < err_tol) {
 			skip <- skip + 1
+			fin_data[end_idx+i] <<- z_n_l[i]
+
+			# diagnostics
 			str_in <- ifelse(all_data[end_idx+i] > lb[i] && all_data[end_idx+i] < ub[i],
 				' in', 'nin')
 			write(sprintf("*t=%3d, actual=%f, fcast=%f, err=%f, %s %f-wide [%f, %f]",
@@ -202,6 +205,7 @@ heur1 <- function() { #{{{
 		} else
 			break
 	}
+	# diagnostics
 	for(i in (skip+1):mssl) {
 		str_in <- ifelse(all_data[end_idx+i] > lb[i] && all_data[end_idx+i] < ub[i],
 			' in', 'nin')
@@ -211,8 +215,7 @@ heur1 <- function() { #{{{
 	}
 	if(skip > 0)
 		fin_errs <<- c(fin_errs, fcast_errs[1:skip])
-	tot_skips <<- tot_skips + skip
-	tot_smpls <<- end_idx + skip
+	tot_skips <<- tot_skips + skip	
 
 	#- - - - - - - - Resume sampling - - - - - - - -
 	# sample slide_step more times before attempting to forecast again
@@ -220,17 +223,18 @@ heur1 <- function() { #{{{
 		slide_step <- skip
 	else
 		slide_step <- mssl
+	z <<- c(z[1:(buf_len+skip)], all_data[(end_idx+skip+1):(end_idx+skip+slide_step)])
 	beg_idx <<- beg_idx + skip + slide_step
-	z <<- all_data[beg_idx:end_idx]
-	if(skip > 0) {
-		z <<- c(z, z_n_l[1:skip])
-		fin_data[(end_idx+1):(end_idx+skip)] <<- z_n_l[1:skip]
-	}
 	end_idx <<- end_idx + skip + slide_step
-	if(end_idx + mssl > max_idx)
+	if(end_idx > max_idx)
 		return(FALSE)
-	z <<- c(z, all_data[(end_idx-slide_step+1):end_idx])
-	z <<- ts(z, start=beg_idx)
+	z <<- ts(z[(length(z)-buf_len+1):length(z)], start=beg_idx)
+	tot_smpls <<- end_idx + skip
+
+	# compare the original samples and our reduced samples	
+	#cat("\n all_data[beg_idx:end_idx]=\n       ", all_data[beg_idx:end_idx], file=out)
+	#cat("\n z=", z, "\n\n", file=out)
+	cat("\n diff=", all_data[beg_idx:end_idx]-z, "\n\n", file=out)
 
 	return(TRUE)
 } #}}}
@@ -254,6 +258,7 @@ eval(call(func_init))
 
 repeat {
 	if(debug) plot(z)
+	#cat(sprintf("\n z=", length(z)), z, "\n\n", file=out)
 	
 	#- - - - Power transformation - - - -
 	# TODO: determine whether to perform power transformation
