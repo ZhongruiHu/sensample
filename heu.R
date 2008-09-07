@@ -6,17 +6,18 @@ graphics.off()
 
 #- - - - - - - - BEGIN CONFIGURABLE SECTION - - - - - - - -
 
-datafname <- 'Olga'
-datatype <- 'Temperature'
-errtol <- 0.3
-#datafname <- 'Intel'
-#datatype <- 'Temperature'
-#errtol <- 0.5
+data_fname <- 'Olga'
+data_type <- 'Temperature'
+err_tol <- 0.3
+#data_fname <- 'Intel'
+#data_type <- 'Temperature'
+#err_tol <- 0.5
 
-all_data <- scan(datafname)
+all_data <- scan(data_fname)
 
+buf_len <- 50
 beg_idx <- 1
-end_idx <- 50
+end_idx <- buf_len
 max_idx <- 300
 
 # maximum p and q
@@ -31,11 +32,11 @@ fcast_lim <- 0.90
 lim_qtile <- qnorm(fcast_lim + (1-fcast_lim)/2)
 
 # select heuristics
-which_heur <- '0'
+which_heur <- '1'
 
 # initialize R environment
-outfname <- sprintf("%s-%d-%s-%d-%d-%1.1f", datafname, max_idx, which_heur, max_p, max_q, errtol)
-out <- file(outfname, 'w')
+out_fname <- sprintf("%s-%d-%s-%d-%d-%1.1f", data_fname, max_idx, which_heur, max_p, max_q, err_tol)
+out <- file(out_fname, 'w')
 debug <- FALSE
 if(debug) {
 	par(mfrow=c(2,4))
@@ -65,48 +66,67 @@ heur0 <- function() { #{{{
 	#- - - - - - - - Step 2 - - - - - - - -
 	# predict 1 sample
 	best_model <- ar.yw(z, order.max=1)
-	horiz <- cssl + 1							# past cssl forecast (skipped samples), 1 current forecast
+	horiz <- cssl + 1							# past cssl forecast (past skipped samples) plus 1 current forecast
 	fcast <- predict(best_model, n.ahead=horiz)	# remember cssl hasn't been incremented yet
 	z <<- c(z, fcast$pred)						# concatenate predictions to original time series
-	xi <- all_data[beg_idx:(beg_idx+d-1)]		# initial values for diffinv
+	xi <- fin_data[beg_idx:(beg_idx+d-1)]		# initial values for diffinv
 	z <<- diffinv(z, differences=d, xi=xi)		# recover original time series
-	z_n_l <- z[(length(z)-horiz+1):length(z)]	# retrieve the forecasts
+	z_n_1 <- z[length(z)]						# retrieve the last forecast	
+
+	# read 1 sample
+	z[length(z)] <<- all_data[end_idx+horiz]
+
 	if(cssl > 0) {
-		# store forecasts
-		fin_data[(end_idx+1):(end_idx+cssl)] <<- z_n_l[1:cssl]
-		fcast_errs <- abs(all_data[(end_idx+1):(end_idx+cssl)] - z_n_l[1:cssl])
+		# Alternatives:
+		# 1) keep forecasts as samples, which has already been done
+		# 2) use interpolated values as samples
+		#    y1 = y0 + (x1-x0)(y2-y0)/(x2-x0)		
+		x0 <- length(z)-horiz; y0 <- z[x0]
+		x2 <- length(z); y2 <- z[x2]
+		for(i in 1:cssl) {			
+			x1 <- length(z)-horiz+i					
+			z[x1] <<- y0 + (x1-x0)*(y2-y0)/(x2-x0)
+			write(sprintf(" x1=%d, y1=%f, x0=%d, y0=%f, x2=%f, y2=%f", x1, z[x1], x0, y0, x2, y2), out)
+		}
+
+		fin_data[(end_idx+1):(end_idx+cssl)] <<- z[(length(z)-cssl):(length(z)-1)]
+		fcast_errs <- abs(
+			all_data[(end_idx+1):(end_idx+cssl)] - fin_data[(end_idx+1):(end_idx+cssl)])
 		fin_errs <<- c(fin_errs, fcast_errs)
 
 		# diagnostics
 		for(i in 1:cssl) {
 			write(sprintf("*t=%3d, actual=%f, fcast=%f, err=%f", 
-				end_idx+i, all_data[end_idx+i], z_n_l[i], fcast_errs[i]), out)	
+				end_idx+i, all_data[end_idx+i], fin_data[end_idx+i], fcast_errs[i]), out)
 		}
 	}
 
-	# read 1 sample
-	beg_idx <<- beg_idx + cssl + 1				# slide sampling window one step forward
-	end_idx <<- end_idx + cssl + 1
-	if(end_idx > max_idx)
-		return(FALSE)
-	z <<- ts(all_data[beg_idx:end_idx], start=beg_idx)
-
 	#- - - - - - - - Step 3 - - - - - - - -	
-	err <- abs(z[length(z)] - z_n_l[length(z_n_l)])
-	if(err < errtol) {
+	err <- abs(z[length(z)] - z_n_1)
+	if(err < err_tol) {
 		cssl <<- min(cssl + 1, mssl)
 		write(sprintf("@t=%3d, actual=%f, fcast=%f, err=%f, cssl=%d", 
-			end_idx, z[length(z)], z_n_l[length(z_n_l)], err, cssl), out)
-	} else {		
+			end_idx+horiz, z[length(z)], z_n_1, err, cssl), out)
+	} else {
 		cssl <<- 0
-		write(sprintf(" t=%3d, actual=%f, fcast=%f, err=%f, reseting cssl", 
-			end_idx, z[length(z)], z_n_l[length(z_n_l)], err), out)
-		return(TRUE)
+		write(sprintf(" t=%3d, actual=%f, fcast=%f, err=%f, resets cssl", 
+			end_idx+horiz, z[length(z)], z_n_1, err), out)
 	}
 
 	#- - - - - - - - Step 4 - - - - - - - -
 	tot_skips <<- tot_skips + cssl
 	tot_smpls <<- end_idx + cssl
+
+	# slide sampling window one step forward
+	beg_idx <<- beg_idx + horiz
+	end_idx <<- end_idx + horiz
+	if(end_idx > max_idx)
+		return(FALSE)	
+	z <<- z[(length(z)-buf_len+1):length(z)]
+	
+	# compare the original samples and our reduced samples
+	#cat("\n all_data[beg_idx:end_idx]=\n   ", all_data[beg_idx:end_idx], file=out)
+	#cat("\n z=", z, "\n", file=out)
 
 	return(TRUE)
 } #}}}
@@ -160,7 +180,7 @@ heur1 <- function() { #{{{
 	#- - - - - - - - Forecast - - - - - - - -
 	fcast <- predict(best_model, n.ahead=mssl)
 	z <<- c(z, fcast$pred)						# concatenate predictions to original time series
-	xi <- all_data[beg_idx:(beg_idx+d-1)]		# initial values for diffinv
+	xi <- all_data[beg_idx:(beg_idx+d-1)]		# initial values for diffinv (TODO)
 	z <<- diffinv(z, differences=d, xi=xi)		# recover original time series
 	z_n_l <- z[(length(z)-mssl+1):length(z)]	# forecasts
 	half_intrvl <- lim_qtile*fcast$se			# half of confidence interval (search 'AirPassengers' in R manual)
@@ -172,7 +192,7 @@ heur1 <- function() { #{{{
 	#- - - - - - - - Skip sampling - - - - - - - -
 	skip <- 0
 	for(i in 1:mssl) {
-		if(half_intrvl[i] < errtol) {
+		if(half_intrvl[i] < err_tol) {
 			skip <- skip + 1
 			str_in <- ifelse(all_data[end_idx+i] > lb[i] && all_data[end_idx+i] < ub[i],
 				' in', 'nin')
@@ -210,7 +230,6 @@ heur1 <- function() { #{{{
 	if(end_idx + mssl > max_idx)
 		return(FALSE)
 	z <<- c(z, all_data[(end_idx-slide_step+1):end_idx])
-	write(sprintf("sizeof(z)=%d", length(z)), out)
 	z <<- ts(z, start=beg_idx)
 
 	return(TRUE)
@@ -258,11 +277,12 @@ write(sprintf("max_p=%d, max_q=%d, tot_skips=%d, tot_smpls=%d, reductn=%f, max_e
 if(debug) {
 	dev.new()
 } else {
-	pdf(sprintf("%s.pdf", outfname))
+	pdf(sprintf("%s.pdf", out_fname))
 }
-plot(ts(all_data[1:tot_smpls], start=1), main=datafname, ylab=datatype)
+plot(ts(all_data[1:tot_smpls], start=1), main=data_fname, ylab=data_type)
 par(col='blue')
 lines(ts(fin_data[1:tot_smpls], start=1))
+legend("bottomright", sprintf('reduction=%f\nmax_err=%f', tot_skips/tot_smpls, max(fin_errs)))
 par(col='black')
 if(!debug) {
 	dev.off()	# needed to flush the PDF
