@@ -2,6 +2,7 @@
 # Simulation of various heuristics
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 require('stats')
+require('modeltools')
 graphics.off()
 
 #- - - - - - - - BEGIN CONFIGURABLE SECTION - - - - - - - -
@@ -274,9 +275,13 @@ repeat {
 		break
 }
 
+# compute Kullback-Leibler divergence
+m = cbind(all_data[1:tot_smpls], fin_data[1:tot_smpls])
+kl_div = KLdiv(cbind(all_data[1:tot_smpls], fin_data[1:tot_smpls]))[1,2]
+
 # display result
-write(sprintf("max_p=%d, max_q=%d, tot_skips=%d, tot_smpls=%d, reductn=%f, max_err=%f(%d)",
-	max_p, max_q, tot_skips, tot_smpls, tot_skips/tot_smpls, max(fin_errs), length(fin_errs)), out)
+write(sprintf("max_p=%d, max_q=%d, tot_skips=%d(%d), tot_smpls=%d, reductn=%f, kl_div=%g",
+	max_p, max_q, tot_skips, length(fin_errs), tot_smpls, tot_skips/tot_smpls, kl_div), out)
 
 # compare raw and skip-sampled data
 if(debug) {
@@ -287,7 +292,7 @@ if(debug) {
 plot(ts(all_data[1:tot_smpls], start=1), main=data_fname, ylab=data_type)
 par(col='blue')
 lines(ts(fin_data[1:tot_smpls], start=1))
-legend("bottomright", sprintf('reduction=%f\nmax_err=%f', tot_skips/tot_smpls, max(fin_errs)))
+legend("bottomright", sprintf('reduction=%f\nkl_div=%g', tot_skips/tot_smpls, kl_div))
 par(col='black')
 if(!debug) {
 	dev.off()	# needed to flush the PDF
