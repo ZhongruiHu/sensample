@@ -2,7 +2,7 @@
 # Simulation of various heuristics
 # To run this simulation, do e.g.:
 # which_heur='0'; which_data=1; source('heu.R')
-# Additionally, max_p and max_q can be set externally
+# Additionally, max_idx, max_p and max_q can be set externally
 #
 # For convenience, copy and paste this to run in batch mode:
 # which_heur='0'; for(which_data in 1:8) source('heu.R') *
@@ -17,7 +17,7 @@
 # which_heur='1'; max_p=max_q=4; for(which_data in 1:8) source('heu.R')
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 require('stats')
-require('flexmix')
+#require('flexmix')	# originally for KLdiv()
 graphics.off()
 
 #- - - - - - - - BEGIN CONFIGURABLE SECTION - - - - - - - -
@@ -50,7 +50,8 @@ all_data <- scan(data_fname)
 buf_len <- 50
 beg_idx <- 1
 end_idx <- buf_len
-max_idx <- 5000
+if(!exists("max_idx"))
+	max_idx <- 5000
 max_dsp_smpls <- 500
 
 # select heuristics
@@ -183,13 +184,13 @@ heur0core <- function(selector) { #{{{
 	return(TRUE)
 } #}}}
 
-heur0 <- function() {
+heur0 <- function() { #{{{
 	return(heur0core('0'))
-}
+} #}}}
 
-heur0a <- function() {
+heur0a <- function() { #{{{
 	return(heur0core('0a'))
-}
+} #}}}
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 # Heuristics 1
@@ -199,11 +200,18 @@ heur0a <- function() {
 #	for k times
 # 4	Slide sampling window k steps forward, i.e. collect k more samples
 # 5 Go back to step 3
+#
+# Heuristics 1a
+# If the first forecast confidence interval > err_tol, then take that
+# as the err_tol
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 init1 <- function() { #{{{
 } #}}}
 
-heur1 <- function() { #{{{
+init1a <- function() { #{{{
+} #}}}
+
+heur1core <- function(selector) { #{{{
 	#- - - - - - - - Model identification and estimation - - - - - - - -
 	if(debug) {
 		acf(z, lag.max=50)
@@ -249,6 +257,15 @@ heur1 <- function() { #{{{
 	ub <- z_n_l + half_intrvl					# upper bounds of confidence intervals
 
 	#- - - - - - - - Skip sampling - - - - - - - -
+	if(selector == '1a') {
+		# adjust err_tol if err_tol is too small
+		if(beg_idx == 1 && err_tol < half_intrvl[1]) {
+			err_tol <<- half_intrvl[1]
+			write(sprintf("err_tol <<- %f", err_tol), out)
+		}
+	}
+	
+	# determine how many to skip
 	skip <- 0
 	for(i in 1:mssl) {
 		if(half_intrvl[i] < err_tol) {
@@ -262,19 +279,23 @@ heur1 <- function() { #{{{
 			write(sprintf("*t=%3d, actual=%f, fcast=%f, err=%f, %s %f-wide [%f, %f]",
 				end_idx+i, all_data[end_idx+i], z_n_l[i], err,
 				str_in, ub[i]-lb[i], lb[i], ub[i]), out)
-		} else
+		} else {
 			break
+		}
 	}
+	tot_skips <<- tot_skips + skip
+
 	# diagnostics
-	for(i in (skip+1):mssl) {
-		err <- abs(all_data[end_idx+i] - z_n_l[i])
-		str_in <- ifelse(all_data[end_idx+i] > lb[i] && all_data[end_idx+i] < ub[i],
-			' in', 'nin')
-		write(sprintf(" t=%3d, actual=%f, fcast=%f, err=%f, %s %f-wide [%f, %f]",
-			end_idx+i, all_data[end_idx+i], z_n_l[i], err,
-			str_in, ub[i]-lb[i], lb[i], ub[i]), out)
+	if(skip < mssl) {
+		for(i in (skip+1):mssl) {
+			err <- abs(all_data[end_idx+i] - z_n_l[i])
+			str_in <- ifelse(all_data[end_idx+i] > lb[i] && all_data[end_idx+i] < ub[i],
+				' in', 'nin')
+			write(sprintf(" t=%3d, actual=%f, fcast=%f, err=%f, %s %f-wide [%f, %f]",
+				end_idx+i, all_data[end_idx+i], z_n_l[i], err,
+				str_in, ub[i]-lb[i], lb[i], ub[i]), out)
+		}
 	}
-	tot_skips <<- tot_skips + skip	
 
 	#- - - - - - - - Resume sampling - - - - - - - -
 	# acquire n2smpls samples before attempting to forecast again
@@ -296,6 +317,14 @@ heur1 <- function() { #{{{
 	cat("\n diff=", abs(all_data[beg_idx:end_idx]-z), "\n\n", file=out)
 
 	return(TRUE)
+} #}}}
+
+heur1 <- function() { #{{{
+	return(heur1core('1'))
+} #}}}
+
+heur1a <- function() { #{{{
+	return(heur1core('1a'))
 } #}}}
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
