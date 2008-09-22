@@ -5,11 +5,11 @@
 # Additionally, max_idx, max_p and max_q can be set externally
 #
 # For convenience, copy and paste this to run in batch mode:
-# which_heur='0'; for(which_data in 1:8) source('heu.R') *
-# which_heur='0a'; for(which_data in 1:8) source('heu.R') *
-# which_heur='1'; max_p=1; max_q=0; for(which_data in 1:8) source('heu.R') *
-# which_heur='1'; max_p=0; max_q=1; for(which_data in 1:8) source('heu.R') *
-# which_heur='1'; max_p=3; max_q=0; for(which_data in 1:8) source('heu.R') *
+# which_heur='0'; for(which_data in 1:8) source('heu.R')
+# which_heur='0a'; for(which_data in 1:8) source('heu.R')
+# which_heur='1'; max_p=1; max_q=0; for(which_data in 1:8) source('heu.R')
+# which_heur='1'; max_p=0; max_q=1; for(which_data in 1:8) source('heu.R')
+# which_heur='1'; max_p=3; max_q=0; for(which_data in 1:8) source('heu.R')
 # which_heur='1'; max_p=6; max_q=0; for(which_data in 1:8) source('heu.R')
 # which_heur='1'; max_p=max_q=1; for(which_data in 1:8) source('heu.R')
 # which_heur='1'; max_p=max_q=2; for(which_data in 1:8) source('heu.R')
@@ -137,7 +137,7 @@ heur0core <- function(selector) { #{{{
 			x0 <- length(z)-horiz; y0 <- z[x0]
 			x2 <- length(z); y2 <- z[x2]
 			for(i in 1:cssl) {			
-				x1 <- length(z)-horiz+i					
+				x1 <- length(z)-horiz+i
 				z[x1] <<- y0 + (x1-x0)*(y2-y0)/(x2-x0)
 				write(sprintf(" x1=%d, y1=%f, x0=%d, y0=%f, x2=%f, y2=%f", x1, z[x1], x0, y0, x2, y2), out)
 			}
@@ -204,11 +204,18 @@ heur0a <- function() { #{{{
 # Heuristics 1a
 # If the first forecast confidence interval > err_tol, then take that
 # as the err_tol
+#
+# Heuristics 1b
+# Combines Heuristics 1a with the using of interpolated values in place
+# of forecasts
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 init1 <- function() { #{{{
 } #}}}
 
 init1a <- function() { #{{{
+} #}}}
+
+init1b <- function() { #{{{
 } #}}}
 
 heur1core <- function(selector) { #{{{
@@ -257,8 +264,8 @@ heur1core <- function(selector) { #{{{
 	ub <- z_n_l + half_intrvl					# upper bounds of confidence intervals
 
 	#- - - - - - - - Skip sampling - - - - - - - -
-	if(selector == '1a') {
-		# adjust err_tol if err_tol is too small
+	# Heuristics 1a, 1b: adjust err_tol if err_tol is too small
+	if(selector == '1a' || selector == '1b') {
 		if(beg_idx == 1 && err_tol < half_intrvl[1]) {
 			err_tol <<- half_intrvl[1]
 			write(sprintf("err_tol <<- %f", err_tol), out)
@@ -304,6 +311,21 @@ heur1core <- function(selector) { #{{{
 	else
 		n2smpls <- mssl
 	z <<- c(z[1:(buf_len+skip)], all_data[(end_idx+skip+1):(end_idx+skip+n2smpls)])
+
+	# Heuristics 1b: replace forecasts with interpolated values
+	if(selector == '1b') {
+		if(skip > 0) {
+			x0 <- buf_len; y0 <- z[x0]
+			x2 <- buf_len+skip+1; y2 <- z[x2]
+			for(i in 1:skip) {
+				x1 <- buf_len+i
+				z[x1] <<- y0 + (x1-x0)*(y2-y0)/(x2-x0)
+				fin_data[end_idx+i] <<- z[x1]
+			}
+		}
+	}
+	
+	# advance pointers
 	beg_idx <<- beg_idx + skip + n2smpls
 	end_idx <<- end_idx + skip + n2smpls
 	tot_smpls <<- end_idx
@@ -325,6 +347,10 @@ heur1 <- function() { #{{{
 
 heur1a <- function() { #{{{
 	return(heur1core('1a'))
+} #}}}
+
+heur1b <- function() { #{{{
+	return(heur1core('1b'))
 } #}}}
 
 # - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
