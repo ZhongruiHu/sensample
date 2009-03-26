@@ -2,13 +2,29 @@ require('stats')
 
 #- - - - - - - - BEGIN CONFIGURABLE SECTION - - - - - - - -
 
-datafname <- 'AllDataFromOlga_NellyBay.txt'
-#datafname <- 'IntelDataSet.txt'
-
-all_data <- scan(datafname)
+if(!exists("which_data"))
+	stop('Must specify which_data')
+switch(which_data,
+	# 1
+	{data_fname <- 'Olga'; data_type <- 'Temperature'; err_tol <- 0.3},
+	# 2
+	{data_fname <- 'Intel1'; data_type <- 'Temperature'; err_tol <- 0.3},
+	# 3
+	{data_fname <- 'Intel2'; data_type <- 'Humidity'; err_tol <- 0.3},
+	# 4
+	{data_fname <- 'Intel3'; data_type <- 'Light'; err_tol <- 3},
+	# 5
+	{data_fname <- '41001h2007WSPD'; data_type <- 'Wind speed';	err_tol <- 0.3},
+	# 6
+	{data_fname <- '41001h2007GST'; data_type <- 'Gust speed'; err_tol <- 0.3},
+	# 7
+	{data_fname <- '41001h2007WVHT'; data_type <- 'Wave height'; err_tol <- 0.3},
+	# 8
+	{data_fname <- '41001h2007PRES'; data_type <- 'Pressure'; err_tol <- 1})
+all_data <- scan(data_fname)
 
 beg_idx <- 1
-end_idx <- 100
+end_idx <- 1000 # 0 = till the end
 
 par(mfrow=c(3,2))
 
@@ -17,7 +33,11 @@ max_q <- 6
 
 #- - - - - - - - END CONFIGURABLE SECTION - - - - - - - -
 
-z <- ts(all_data[beg_idx:end_idx], start=beg_idx)
+if(end_idx > 0) {
+	z <- ts(all_data[beg_idx:end_idx], start=beg_idx)
+} else {
+	z <- ts(all_data[-(1:(beg_idx-1))], start=beg_idx)
+}
 z0 <- z
 plot(z)
 
